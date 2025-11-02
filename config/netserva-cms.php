@@ -93,6 +93,7 @@ return [
     'blog' => [
         'enabled' => env('CMS_BLOG_ENABLED', true),
         'route_prefix' => env('CMS_BLOG_PREFIX', 'blog'),
+        'posts_per_page' => env('CMS_BLOG_POSTS_PER_PAGE', 6),
         'categories_enabled' => env('CMS_CATEGORIES_ENABLED', true),
         'tags_enabled' => env('CMS_TAGS_ENABLED', true),
     ],
