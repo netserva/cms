@@ -9,7 +9,6 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
-use Filament\Actions\EditAction;
 use Filament\Forms;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Grid;
@@ -257,8 +256,7 @@ class ThemeResource extends Resource
                 Tables\Columns\TextColumn::make('display_name')
                     ->label('Theme')
                     ->searchable()
-                    ->sortable()
-                    ->description(fn (Theme $record): string => $record->name),
+                    ->sortable(),
 
                 Tables\Columns\TextColumn::make('version')
                     ->badge()
@@ -330,7 +328,197 @@ class ThemeResource extends Resource
                             ->send();
                     }),
 
-                EditAction::make(),
+                Action::make('edit')
+                    ->label('Edit')
+                    ->icon('heroicon-o-pencil')
+                    ->modalWidth('5xl')
+                    ->fillForm(function (Theme $record): array {
+                        $data = [];
+
+                        // Load theme information
+                        $data['display_name'] = $record->display_name;
+                        $data['name'] = $record->name;
+                        $data['version'] = $record->version;
+                        $data['author'] = $record->author;
+                        $data['description'] = $record->description;
+                        $data['parent_theme'] = $record->parent_theme;
+                        $data['is_active'] = $record->is_active;
+
+                        // Load color settings
+                        foreach ($record->colors() as $color) {
+                            $slug = $color['slug'];
+                            $data["color_{$slug}"] = $record->setting("colors.{$slug}", $color['value']);
+                        }
+
+                        // Load typography settings
+                        $typography = $record->typography();
+                        if (isset($typography['fonts']['heading']['family'])) {
+                            $data['font_heading'] = $record->setting('typography.fonts.heading.family', $typography['fonts']['heading']['family']);
+                        }
+                        if (isset($typography['fonts']['body']['family'])) {
+                            $data['font_body'] = $record->setting('typography.fonts.body.family', $typography['fonts']['body']['family']);
+                        }
+
+                        // Load layout settings
+                        $data['content_width'] = $record->setting('layout.contentWidth', '800px');
+                        $data['wide_width'] = $record->setting('layout.wideWidth', '1200px');
+
+                        return $data;
+                    })
+                    ->schema(function (Theme $record): array {
+                        $colorInputs = [];
+                        $colors = $record->colors();
+
+                        if (empty($colors)) {
+                            $colorInputs[] = Forms\Components\Placeholder::make('no_colors')
+                                ->label('')
+                                ->content('⚠️ No colors defined in theme manifest. Create a theme.json file in resources/themes/'.$record->name.'/ to add customizable colors.');
+                        } else {
+                            foreach ($colors as $color) {
+                                $slug = $color['slug'];
+                                $colorInputs[] = Forms\Components\ColorPicker::make("color_{$slug}")
+                                    ->label($color['name'])
+                                    ->default($color['value']);
+                            }
+                        }
+
+                        $typography = $record->typography();
+
+                        return [
+                            Section::make('Theme Information')
+                                ->schema([
+                                    Forms\Components\TextInput::make('display_name')
+                                        ->label('Display Name')
+                                        ->required()
+                                        ->maxLength(255),
+
+                                    Forms\Components\TextInput::make('name')
+                                        ->label('Theme Slug')
+                                        ->disabled(),
+
+                                    Forms\Components\TextInput::make('version')
+                                        ->label('Version')
+                                        ->maxLength(255),
+
+                                    Forms\Components\TextInput::make('author')
+                                        ->label('Author')
+                                        ->maxLength(255),
+
+                                    Forms\Components\Select::make('parent_theme')
+                                        ->label('Parent Theme')
+                                        ->relationship('parent', 'display_name')
+                                        ->searchable()
+                                        ->preload(),
+
+                                    Forms\Components\Toggle::make('is_active')
+                                        ->label('Active')
+                                        ->disabled(),
+
+                                    Forms\Components\Textarea::make('description')
+                                        ->rows(3)
+                                        ->maxLength(500)
+                                        ->columnSpanFull(),
+                                ])
+                                ->columns(3)
+                                ->collapsible(),
+
+                            Section::make('Colors')
+                                ->schema($colorInputs)
+                                ->columns(2)
+                                ->collapsible()
+                                ->collapsed(),
+
+                            Section::make('Typography')
+                                ->schema(empty($typography) ? [
+                                    Forms\Components\Placeholder::make('no_typography')
+                                        ->label('')
+                                        ->content('⚠️ No typography settings defined in theme manifest.'),
+                                ] : [
+                                    Forms\Components\TextInput::make('font_heading')
+                                        ->label('Heading Font')
+                                        ->default($typography['fonts']['heading']['family'] ?? 'Inter'),
+
+                                    Forms\Components\TextInput::make('font_body')
+                                        ->label('Body Font')
+                                        ->default($typography['fonts']['body']['family'] ?? 'system-ui'),
+                                ])
+                                ->columns(2)
+                                ->collapsible()
+                                ->collapsed(),
+
+                            Section::make('Layout')
+                                ->schema(empty($record->manifest['settings']['layout'] ?? null) ? [
+                                    Forms\Components\Placeholder::make('no_layout')
+                                        ->label('')
+                                        ->content('⚠️ No layout settings defined in theme manifest. Using defaults.'),
+                                    Forms\Components\TextInput::make('content_width')
+                                        ->label('Content Width')
+                                        ->default('800px'),
+
+                                    Forms\Components\TextInput::make('wide_width')
+                                        ->label('Wide Width')
+                                        ->default('1200px'),
+                                ] : [
+                                    Forms\Components\TextInput::make('content_width')
+                                        ->label('Content Width')
+                                        ->default('800px'),
+
+                                    Forms\Components\TextInput::make('wide_width')
+                                        ->label('Wide Width')
+                                        ->default('1200px'),
+                                ])
+                                ->columns(2)
+                                ->collapsible()
+                                ->collapsed(),
+                        ];
+                    })
+                    ->action(function (Theme $record, array $data): void {
+                        // Save theme information
+                        $record->update([
+                            'display_name' => $data['display_name'],
+                            'version' => $data['version'] ?? $record->version,
+                            'author' => $data['author'] ?? $record->author,
+                            'description' => $data['description'] ?? $record->description,
+                            'parent_theme' => $data['parent_theme'] ?? $record->parent_theme,
+                        ]);
+
+                        // Save color settings
+                        foreach ($record->colors() as $color) {
+                            $slug = $color['slug'];
+                            $key = "color_{$slug}";
+
+                            if (isset($data[$key])) {
+                                $record->setSetting("colors.{$slug}", $data[$key], 'colors');
+                            }
+                        }
+
+                        // Save typography settings
+                        if (isset($data['font_heading'])) {
+                            $record->setSetting('typography.fonts.heading.family', $data['font_heading'], 'typography');
+                        }
+                        if (isset($data['font_body'])) {
+                            $record->setSetting('typography.fonts.body.family', $data['font_body'], 'typography');
+                        }
+
+                        // Save layout settings
+                        if (isset($data['content_width'])) {
+                            $record->setSetting('layout.contentWidth', $data['content_width'], 'layout');
+                        }
+                        if (isset($data['wide_width'])) {
+                            $record->setSetting('layout.wideWidth', $data['wide_width'], 'layout');
+                        }
+
+                        // Clear theme cache if this is the active theme
+                        if ($record->is_active) {
+                            app(ThemeService::class)->clearCache();
+                        }
+
+                        \Filament\Notifications\Notification::make()
+                            ->title('Settings Saved')
+                            ->body('Theme settings have been updated successfully.')
+                            ->success()
+                            ->send();
+                    }),
 
                 Action::make('view_manifest')
                     ->label('View Manifest')
@@ -383,7 +571,6 @@ class ThemeResource extends Resource
         return [
             'index' => Pages\ListThemes::route('/'),
             'create' => Pages\CreateTheme::route('/create'),
-            'edit' => Pages\EditTheme::route('/{record}/edit'),
         ];
     }
 }
